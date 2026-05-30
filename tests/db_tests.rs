@@ -17,6 +17,7 @@ async fn create_and_find_user() {
         user_id: "u1".to_string(),
         user_name: "Alice".to_string(),
         password: "secret".to_string(),
+        token: "token".to_string()
     };
 
     let res = create_user(&db, form.clone()).await.expect("create_user failed");
@@ -44,6 +45,7 @@ async fn duplicate_user_id_fails() {
         user_id: "dup".to_string(),
         user_name: "Bob".to_string(),
         password: "pw".to_string(),
+        token: "tk".to_string(),
     };
 
     let _ = create_user(&db, form.clone()).await.expect("first insert failed");

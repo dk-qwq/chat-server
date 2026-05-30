@@ -12,6 +12,7 @@ pub struct Model {
     pub user_id: String,
     pub user_name: String,
     pub password: String,
+    pub token: String,
 }
 
 

@@ -1,13 +1,18 @@
 #![allow(dead_code)]
 
-use sea_orm::{ActiveModelTrait, ConnectionTrait, DatabaseConnection, DbErr};
-pub struct UserManager {
-    db: DatabaseConnection,
-}
-
+use rand::{RngExt, distr::Alphabetic};
+use sea_orm::{ActiveModelTrait, ConnectionTrait, DbErr};
 use crate::entity::users;
 
 use sea_orm::Set;
+
+fn gen_token(length: usize) -> String {
+    let mut rng = rand::rng();
+
+    (0..length)
+        .map(|_| rng.sample(Alphabetic) as char)
+        .collect()
+}
 
 pub async fn create_user(
     db: &impl ConnectionTrait,
@@ -17,6 +22,7 @@ pub async fn create_user(
         user_id: Set(form.user_id),
         user_name: Set(form.user_name),
         password: Set(form.password),
+        token: Set(gen_token(128)),
         ..Default::default()
     };
     active_model.insert(db).await
