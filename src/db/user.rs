@@ -19,7 +19,6 @@ pub async fn create_user(
     form: users::Model
 ) -> Result<users::Model, DbErr> {
     let active_model = users::ActiveModel {
-        user_id: Set(form.user_id),
         user_name: Set(form.user_name),
         password: Set(form.password),
         token: Set(gen_token(128)),
@@ -28,9 +27,9 @@ pub async fn create_user(
     active_model.insert(db).await
 }
 
-pub async fn find_by_user_id(
+pub async fn find_by_user_name(
     db: &impl ConnectionTrait,
-    user_id: String
+    user_name: String
 ) -> Result<Option<users::Model>, DbErr> {
-    users::Entity::find_by_user_id(user_id).one(db).await
+    users::Entity::find_by_user_name(user_name).one(db).await
 }

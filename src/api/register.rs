@@ -2,7 +2,7 @@ use axum::{
     extract::{Json, State},
     http::StatusCode,
 };
-use rand::RngExt;
+use sea_orm::sea_query::value::prelude::serde_json;
 use serde::{Deserialize, Serialize};
 
 use crate::{db::user, entity::users};
@@ -13,33 +13,65 @@ pub(super) struct RegisterRequest {
     password: String,
 }
 
-#[derive(Serialize)]
-pub(super) struct AuthBody {
-    user_id: String,
-}
-
-fn gen_id() -> String {
-    rand::rng().random::<i128>().to_string()
-}
-
 pub(super) async fn handler_register(
     State(db): State<sea_orm::DatabaseConnection>,
-    Json(payload): Json<RegisterRequest>,
-) -> Result<Json<AuthBody>, StatusCode> {
-    match user::create_user(&db, users::Model{
-        id: 0,
-        user_id: gen_id(),
-        user_name: payload.user_name,
-        password: payload.password,
-        token: String::new()
-    }).await {
+    Json(RegisterRequest {
+        user_name,
+        password,
+    }): Json<RegisterRequest>,
+) -> (StatusCode, Json<serde_json::Value>) {
+    if user_name.is_empty() || password.is_empty() {
+        return (
+            StatusCode::BAD_REQUEST,
+            serde_json::json!({
+                "message": "用户名或密码不能为空"
+            })
+            .into(),
+        );
+    }
+
+    let db_error = (
+        StatusCode::SERVICE_UNAVAILABLE,
+        serde_json::json!({
+            "message": "远程连接错误",
+        })
+        .into(),
+    );
+
+    match user::find_by_user_name(&db, user_name.clone()).await {
         Err(_) => {
-            Err(StatusCode::SERVICE_UNAVAILABLE)
+            return db_error;
         }
-        Ok(user) => {
-            Ok(Json(AuthBody{
-                user_id: user.user_id
-            }))
+        Ok(Some(_)) => {
+            return (
+                StatusCode::CONFLICT,
+                serde_json::json!({
+                        "message": "该用户名已被使用",
+                })
+                .into(),
+            );
         }
+        Ok(None) => {}
+    }
+
+    match user::create_user(
+        &db,
+        users::Model {
+            id: 0,
+            user_name,
+            password,
+            token: String::new(),
+        },
+    )
+    .await
+    {
+        Err(_) => db_error,
+        Ok(_) => (
+            StatusCode::CREATED,
+            serde_json::json!(
+              {"message": "注册成功"}
+            )
+            .into(),
+        ),
     }
 }
