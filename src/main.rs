@@ -1,15 +1,15 @@
-use axum::{
-    Router,
-    routing::get
-};
+use axum::{Router, routing::get};
+use chat_server::{AppState};
 use sea_orm::Database;
+use tokio::sync::broadcast;
 use tower_http::trace::TraceLayer;
 
 use crate::api::init_api_router;
 
+mod api;
 mod db;
 mod entity;
-mod api;
+mod middleware;
 
 #[tokio::main]
 async fn main() {
@@ -18,14 +18,18 @@ async fn main() {
         .init();
 
     let db = Database::connect("sqlite://users.sqlite?mode=rwc")
-        .await.unwrap();
-
+        .await
+        .unwrap();
     db::init_user_table(&db).await;
 
-    let api_router = init_api_router().with_state(db);
+    let (tx, _rx) = broadcast::channel::<String>(20);
+
+    let app_state = AppState { db, tx };
+
+    let api_router = init_api_router(app_state);
 
     let app = Router::new()
-        .route("/health", get(|| async {"OK"}))
+        .route("/health", get(|| async { "OK" }))
         .nest("/api", api_router)
         .layer(TraceLayer::new_for_http());
 

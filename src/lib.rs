@@ -1,10 +1,18 @@
 pub mod api;
 pub mod db;
 pub mod entity;
+pub mod middleware;
 
-use axum::{Router, routing::get};
+use axum::{Router, extract::FromRef, routing::get};
 use sea_orm::Database;
+use tokio::sync::broadcast;
 use tower_http::trace::TraceLayer;
+
+#[derive(Clone, FromRef)]
+pub struct AppState {
+    pub db: sea_orm::DatabaseConnection,
+    pub tx: broadcast::Sender<String>,
+}
 
 /// 构建测试用 App（使用内存数据库）
 pub async fn build_test_app() -> Router {
@@ -14,7 +22,11 @@ pub async fn build_test_app() -> Router {
 
     db::init_user_table(&db).await;
 
-    let api_router = api::init_api_router().with_state(db);
+    let (tx, _rx) = broadcast::channel::<String>(20);
+
+    let app_state = AppState { db, tx };
+
+    let api_router = api::init_api_router(app_state);
 
     Router::new()
         .route("/health", get(|| async { "OK" }))

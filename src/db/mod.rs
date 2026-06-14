@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 pub mod user;
 
 use crate::entity::users;
@@ -10,7 +8,10 @@ pub async fn init_user_table(db: &impl ConnectionTrait) {
     let schema = Schema::new(builder);
 
     db.execute(
-        schema.create_table_from_entity(users::Entity)
-            .if_not_exists()
-    ).await.unwrap();
+        schema
+            .create_table_from_entity(users::Entity)
+            .if_not_exists(),
+    )
+    .await
+    .unwrap();
 }

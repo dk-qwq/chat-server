@@ -11,6 +11,7 @@ pub struct Model {
     #[sea_orm(unique)]
     pub user_name: String,
     pub password: String,
+    #[sea_orm(unique)]
     pub token: String,
 }
 

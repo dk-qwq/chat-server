@@ -2,7 +2,7 @@
 
 use rand::{RngExt, distr::Alphabetic};
 use sea_orm::{ActiveModelTrait, ConnectionTrait, DbErr};
-use crate::entity::users;
+use crate::{entity::users};
 
 use sea_orm::Set;
 
@@ -32,4 +32,11 @@ pub async fn find_by_user_name(
     user_name: String
 ) -> Result<Option<users::Model>, DbErr> {
     users::Entity::find_by_user_name(user_name).one(db).await
+}
+
+pub async fn find_by_token(
+    db: &impl ConnectionTrait,
+    token: String
+) -> Result<Option<users::Model>, DbErr> {
+    users::Entity::find_by_token(token).one(db).await
 }
