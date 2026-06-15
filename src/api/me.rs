@@ -2,7 +2,7 @@ use axum::{extract::State, http::StatusCode, response::IntoResponse};
 use axum_extra::extract::CookieJar;
 use sea_orm::sea_query::value::prelude::serde_json::json;
 
-use crate::db::user;
+use crate::db::users;
 
 pub(super) async fn handler_me(
     State(db): State<sea_orm::DatabaseConnection>,
@@ -28,7 +28,7 @@ pub(super) async fn handler_me(
         return no_user;
     };
 
-    match user::find_by_token(&db, token.value().to_string()).await {
+    match users::find_by_token(&db, token.value().to_string()).await {
         Ok(Some(user)) => (
             StatusCode::OK,
             axum::Json(json!({

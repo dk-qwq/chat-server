@@ -10,17 +10,17 @@ use tokio::sync::broadcast::Sender;
 use axum::extract::ws::Message as WsMessage;
 use tracing::debug;
 
-use crate::entity::{message::Message, users};
+use crate::entity::{message, user};
 
 pub(super) async fn handler_ws(
     ws: WebSocketUpgrade,
     State(tx): State<Sender<String>>,
-    Extension(current_user): Extension<users::Model>,
+    Extension(current_user): Extension<user::Model>,
 ) -> Response {
     ws.on_upgrade(|socket| handler_socket(socket, tx, current_user))
 }
 
-async fn handler_socket(socket: WebSocket, tx: Sender<String>, current_user: users::Model) {
+async fn handler_socket(socket: WebSocket, tx: Sender<String>, current_user: user::Model) {
     let username = current_user.user_name.clone();
     debug!("连接成功, user: {}", username);
 
@@ -41,7 +41,7 @@ async fn handler_socket(socket: WebSocket, tx: Sender<String>, current_user: use
 
             debug!("raw_message recv: {}", raw_message);
 
-            let mut message = match serde_json::from_str::<Message>(raw_message.as_str()) {
+            let mut message = match serde_json::from_str::<message::Model>(raw_message.as_str()) {
                 Ok(message) => message,
                 Err(e) => {
                     debug!("failed to deserialize message with error: {}", e);

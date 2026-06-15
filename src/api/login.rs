@@ -4,7 +4,7 @@ use axum::{
     response::IntoResponse,
 };
 use axum_extra::extract::{CookieJar, cookie::Cookie};
-use crate::{db::user};
+use crate::{db::users};
 use sea_orm::sea_query::value::prelude::serde_json::json;
 use serde::{Deserialize, Serialize};
 
@@ -47,7 +47,7 @@ pub(super) async fn handler_login(
     )
         .into_response();
 
-    match user::find_by_user_name(&db, user_name).await {
+    match users::find_by_user_name(&db, user_name).await {
         Err(_) => db_error,
         Ok(None) => unauthorized_error,
         Ok(Some(user)) => match user.password == password {

@@ -1,6 +1,6 @@
-pub mod user;
+pub mod users;
 
-use crate::entity::users;
+use crate::entity::user;
 use sea_orm::{ConnectionTrait, Schema};
 
 pub async fn init_user_table(db: &impl ConnectionTrait) {
@@ -9,7 +9,7 @@ pub async fn init_user_table(db: &impl ConnectionTrait) {
 
     db.execute(
         schema
-            .create_table_from_entity(users::Entity)
+            .create_table_from_entity(user::Entity)
             .if_not_exists(),
     )
     .await

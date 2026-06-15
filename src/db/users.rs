@@ -2,7 +2,7 @@
 
 use rand::{RngExt, distr::Alphabetic};
 use sea_orm::{ActiveModelTrait, ConnectionTrait, DbErr};
-use crate::{entity::users};
+use crate::{entity::user};
 
 use sea_orm::Set;
 
@@ -16,9 +16,9 @@ fn gen_token(length: usize) -> String {
 
 pub async fn create_user(
     db: &impl ConnectionTrait,
-    form: users::Model
-) -> Result<users::Model, DbErr> {
-    let active_model = users::ActiveModel {
+    form: user::Model
+) -> Result<user::Model, DbErr> {
+    let active_model = user::ActiveModel {
         user_name: Set(form.user_name),
         password: Set(form.password),
         token: Set(gen_token(128)),
@@ -30,13 +30,13 @@ pub async fn create_user(
 pub async fn find_by_user_name(
     db: &impl ConnectionTrait,
     user_name: String
-) -> Result<Option<users::Model>, DbErr> {
-    users::Entity::find_by_user_name(user_name).one(db).await
+) -> Result<Option<user::Model>, DbErr> {
+    user::Entity::find_by_user_name(user_name).one(db).await
 }
 
 pub async fn find_by_token(
     db: &impl ConnectionTrait,
     token: String
-) -> Result<Option<users::Model>, DbErr> {
-    users::Entity::find_by_token(token).one(db).await
+) -> Result<Option<user::Model>, DbErr> {
+    user::Entity::find_by_token(token).one(db).await
 }

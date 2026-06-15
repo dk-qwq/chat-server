@@ -7,7 +7,7 @@ use axum::{
 use axum_extra::extract::CookieJar;
 use serde_json::json;
 
-use crate::db::user;
+use crate::db::users;
 
 pub async fn auth_middleware(
     cookie_jar: CookieJar,
@@ -35,7 +35,7 @@ pub async fn auth_middleware(
         return no_user;
     };
 
-    match user::find_by_token(&db, token.value().to_string()).await {
+    match users::find_by_token(&db, token.value().to_string()).await {
         Ok(Some(user)) => {
             request.extensions_mut().insert(user);
 

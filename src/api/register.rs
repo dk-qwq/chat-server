@@ -5,7 +5,7 @@ use axum::{
 use sea_orm::sea_query::value::prelude::serde_json;
 use serde::{Deserialize, Serialize};
 
-use crate::{db::user, entity::users};
+use crate::{db::users, entity::user};
 
 #[derive(Serialize, Deserialize)]
 pub(super) struct RegisterRequest {
@@ -38,7 +38,7 @@ pub(super) async fn handler_register(
         .into(),
     );
 
-    match user::find_by_user_name(&db, user_name.clone()).await {
+    match users::find_by_user_name(&db, user_name.clone()).await {
         Err(_) => {
             return db_error;
         }
@@ -54,9 +54,9 @@ pub(super) async fn handler_register(
         Ok(None) => {}
     }
 
-    match user::create_user(
+    match users::create_user(
         &db,
-        users::Model {
+        user::Model {
             id: 0,
             user_name,
             password,
