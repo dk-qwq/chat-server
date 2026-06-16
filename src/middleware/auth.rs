@@ -7,11 +7,11 @@ use axum::{
 use axum_extra::extract::CookieJar;
 use serde_json::json;
 
-use crate::db::users;
+use crate::{state::UserDb, db::users};
 
 pub async fn auth_middleware(
     cookie_jar: CookieJar,
-    State(db): State<sea_orm::DatabaseConnection>,
+    State(db): State<UserDb>,
     mut request: Request,
     next: Next,
 ) -> Response {

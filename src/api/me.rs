@@ -2,10 +2,10 @@ use axum::{extract::State, http::StatusCode, response::IntoResponse};
 use axum_extra::extract::CookieJar;
 use sea_orm::sea_query::value::prelude::serde_json::json;
 
-use crate::db::users;
+use crate::{db::users, state::UserDb};
 
 pub(super) async fn handler_me(
-    State(db): State<sea_orm::DatabaseConnection>,
+    State(db): State<UserDb>,
     cookie_jar: CookieJar,
 ) -> impl IntoResponse {
     let db_error = (

@@ -4,7 +4,7 @@ use axum::{
     response::IntoResponse,
 };
 use axum_extra::extract::{CookieJar, cookie::Cookie};
-use crate::{db::users};
+use crate::{db::users, state::UserDb};
 use sea_orm::sea_query::value::prelude::serde_json::json;
 use serde::{Deserialize, Serialize};
 
@@ -15,7 +15,7 @@ pub(super) struct LoginRequest {
 }
 
 pub(super) async fn handler_login(
-    State(db): State<sea_orm::DatabaseConnection>,
+    State(db): State<UserDb>,
     cookie_jar: CookieJar,
     Json(LoginRequest {
         user_name,

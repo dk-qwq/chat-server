@@ -1,15 +1,18 @@
 use axum::{Router, routing::get};
-use chat_server::{AppState};
 use sea_orm::Database;
 use tokio::sync::broadcast;
 use tower_http::trace::TraceLayer;
 
-use crate::api::init_api_router;
+use crate::{
+    api::init_api_router,
+    state::{AppState, MessageDb, UserDb},
+};
 
 mod api;
 mod db;
 mod entity;
 mod middleware;
+mod state;
 
 #[tokio::main]
 async fn main() {
@@ -17,14 +20,26 @@ async fn main() {
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .init();
 
-    let db = Database::connect("sqlite://users.sqlite?mode=rwc")
+    let user_db = Database::connect("sqlite://users.sqlite?mode=rwc")
         .await
         .unwrap();
-    db::init_user_table(&db).await;
+    let message_db = Database::connect("sqlite://messages.sqlite?mode=rwc")
+        .await
+        .unwrap();
+
+    let user_db = UserDb(user_db);
+    let message_db = MessageDb(message_db);
+
+    db::init_user_table(&user_db).await;
+    db::init_message_table(&message_db).await;
 
     let (tx, _rx) = broadcast::channel::<String>(20);
 
-    let app_state = AppState { db, tx };
+    let app_state = AppState {
+        user_db,
+        message_db,
+        tx,
+    };
 
     let api_router = init_api_router(app_state);
 

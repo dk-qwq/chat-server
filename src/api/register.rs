@@ -5,7 +5,7 @@ use axum::{
 use sea_orm::sea_query::value::prelude::serde_json;
 use serde::{Deserialize, Serialize};
 
-use crate::{db::users, entity::user};
+use crate::{state::UserDb, db::users, entity::user};
 
 #[derive(Serialize, Deserialize)]
 pub(super) struct RegisterRequest {
@@ -14,7 +14,7 @@ pub(super) struct RegisterRequest {
 }
 
 pub(super) async fn handler_register(
-    State(db): State<sea_orm::DatabaseConnection>,
+    State(db): State<UserDb>,
     Json(RegisterRequest {
         user_name,
         password,

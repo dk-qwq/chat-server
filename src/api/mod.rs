@@ -4,13 +4,20 @@ use axum::{
 };
 
 use crate::{
-    AppState,
-    api::{login::handler_login, me::handler_me, register::handler_register, ws::handler_ws},
+    api::{
+        login::handler_login,
+        me::handler_me,
+        messages::{get_message, latest_message},
+        register::handler_register,
+        ws::handler_ws,
+    },
     middleware::auth::auth_middleware,
+    state::AppState,
 };
 
 mod login;
 mod me;
+mod messages;
 mod register;
 mod ws;
 
@@ -22,7 +29,12 @@ pub fn init_api_router(app_state: AppState) -> Router {
     let protected_router = Router::new()
         .route("/me", get(handler_me))
         .route("/ws", any(handler_ws))
-        .route_layer(middleware::from_fn_with_state(app_state.clone(), auth_middleware));
+        .route("/messages", get(get_message))
+        .route("/messages/latest", get(latest_message))
+        .route_layer(middleware::from_fn_with_state(
+            app_state.clone(),
+            auth_middleware,
+        ));
 
     public_router.merge(protected_router).with_state(app_state)
 }
