@@ -14,6 +14,7 @@ pub(super) struct LoginRequest {
     password: String,
 }
 
+#[axum::debug_handler]
 pub(super) async fn handler_login(
     State(db): State<UserDb>,
     cookie_jar: CookieJar,

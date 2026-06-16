@@ -1,11 +1,11 @@
 use axum::{Router, routing::get};
 use sea_orm::Database;
-use tokio::sync::broadcast;
 use tower_http::trace::TraceLayer;
 
 use crate::{
     api::init_api_router,
     state::{AppState, MessageDb, UserDb},
+    ws::{hub::Chathub, room::RoomActor},
 };
 
 mod api;
@@ -13,6 +13,7 @@ mod db;
 mod entity;
 mod middleware;
 mod state;
+mod ws;
 
 #[tokio::main]
 async fn main() {
@@ -33,13 +34,17 @@ async fn main() {
     db::init_user_table(&user_db).await;
     db::init_message_table(&message_db).await;
 
-    let (tx, _rx) = broadcast::channel::<String>(20);
+    const BUFFER_SIZE: usize = 200;
+
+    let global_room = RoomActor::new(BUFFER_SIZE, message_db.clone());
 
     let app_state = AppState {
         user_db,
         message_db,
-        tx,
+        chathub: Chathub::new(global_room.sender()),
     };
+
+    tokio::spawn(global_room.run());
 
     let api_router = init_api_router(app_state);
 

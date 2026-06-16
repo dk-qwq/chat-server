@@ -1,9 +1,9 @@
 use axum_test::TestServer;
-use chat_server::{api, db, state::{AppState, MessageDb, UserDb}, entity::message};
+use chat_server::{api, db, state::{AppState, MessageDb, UserDb}, entity::message, ws::{hub::Chathub, protocol::RoomCommand}};
 use sea_orm::Database;
 use serde_json::{json, Value};
 use axum::{Router, http::StatusCode, routing::get};
-use tokio::sync::broadcast;
+use tokio::sync::mpsc;
 use tower_http::trace::TraceLayer;
 use chrono::Utc;
 
@@ -24,12 +24,12 @@ pub async fn build_test_app() -> Router {
     db::init_message_table(&message_db).await;
     
 
-    let (tx, _rx) = broadcast::channel::<String>(20);
+    let (tx, _rx) = mpsc::channel::<RoomCommand>(32);
 
     let app_state = AppState {
         user_db,
         message_db,
-        tx,
+        chathub: Chathub::new(tx),
     };
 
     let api_router = api::init_api_router(app_state);
