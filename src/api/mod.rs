@@ -7,7 +7,7 @@ use crate::{
     api::{
         login::handler_login,
         me::handler_me,
-        messages::{get_message, latest_message},
+        messages::{get_message, latest_message_id},
         register::handler_register,
         ws::handler_ws,
     },
@@ -30,7 +30,7 @@ pub fn init_api_router(app_state: AppState) -> Router {
         .route("/me", get(handler_me))
         .route("/ws", any(handler_ws))
         .route("/messages", get(get_message))
-        .route("/messages/latest", get(latest_message))
+        .route("/messages/meta", get(latest_message_id))
         .route_layer(middleware::from_fn_with_state(
             app_state.clone(),
             auth_middleware,

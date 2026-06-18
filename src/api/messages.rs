@@ -53,11 +53,16 @@ pub(super) async fn get_message(
 
     match res {
         Err(_) => db_error,
-        Ok(vec) => (StatusCode::OK, axum::Json(vec)).into_response(),
+        Ok(vec) => (
+            StatusCode::OK, 
+            axum::Json(json!({
+                "messages": vec,
+            })),
+        ).into_response(),
     }
 }
 
-pub(super) async fn latest_message(State(db): State<MessageDb>) -> impl IntoResponse {
+pub(super) async fn latest_message_id(State(db): State<MessageDb>) -> impl IntoResponse {
     let db_error = (
         StatusCode::SERVICE_UNAVAILABLE,
         axum::Json(json!({
@@ -69,7 +74,7 @@ pub(super) async fn latest_message(State(db): State<MessageDb>) -> impl IntoResp
     let id = match messages::latest_message_id(&db).await {
         Err(_) => return db_error,
         Ok(Some(id)) => id,
-        Ok(None) => 0,
+        Ok(None) => 1,
     };
 
     (
