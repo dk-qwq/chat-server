@@ -75,13 +75,29 @@ mod tests {
             .expect("Failed to connect to in-memory SQLite");
         let message_db = MessageDb(db);
         
-        // Initialize table
+        // Initialize all required tables (FK dependencies)
         let builder = message_db.get_database_backend();
         let schema = sea_orm::Schema::new(builder);
         message_db
             .execute(
                 schema
-                    .create_table_from_entity(message::Entity)
+                    .create_table_from_entity(crate::entity::user::Entity)
+                    .if_not_exists(),
+            )
+            .await
+            .expect("Failed to initialize user table");
+        message_db
+            .execute(
+                schema
+                    .create_table_from_entity(crate::entity::room::Entity)
+                    .if_not_exists(),
+            )
+            .await
+            .expect("Failed to initialize room table");
+        message_db
+            .execute(
+                schema
+                    .create_table_from_entity(crate::entity::message::Entity)
                     .if_not_exists(),
             )
             .await
@@ -98,6 +114,8 @@ mod tests {
             user_name: "test_user".to_string(),
             content: "test content".to_string(),
             timestamp: Utc::now(),
+            room_id: None,
+            user_id: None,
         };
 
         let result = insert_message(&db, msg.clone()).await;
@@ -117,6 +135,8 @@ mod tests {
             user_name: "user@123".to_string(),
             content: "Message with 中文, emoji 😊 and \n newlines!".to_string(),
             timestamp: Utc::now(),
+            room_id: None,
+            user_id: None,
         };
 
         let result = insert_message(&db, msg.clone()).await;
@@ -145,6 +165,8 @@ mod tests {
             user_name: "user1".to_string(),
             content: "msg1".to_string(),
             timestamp: Utc::now(),
+            room_id: None,
+            user_id: None,
         };
         let _ = insert_message(&db, msg).await;
 
@@ -163,6 +185,8 @@ mod tests {
                 user_name: format!("user{}", i),
                 content: format!("msg{}", i),
                 timestamp: Utc::now(),
+                room_id: None,
+                user_id: None,
             };
             let _ = insert_message(&db, msg).await;
         }
@@ -182,6 +206,8 @@ mod tests {
                 user_name: format!("user{}", i),
                 content: format!("msg{}", i),
                 timestamp: Utc::now(),
+                room_id: None,
+                user_id: None,
             };
             let _ = insert_message(&db, msg).await;
         }
@@ -201,6 +227,8 @@ mod tests {
                 user_name: format!("user{}", i),
                 content: format!("msg{}", i),
                 timestamp: Utc::now(),
+                room_id: None,
+                user_id: None,
             };
             let _ = insert_message(&db, msg).await;
         }
@@ -225,6 +253,8 @@ mod tests {
                 user_name: format!("user{}", i),
                 content: format!("msg{}", i),
                 timestamp: Utc::now(),
+                room_id: None,
+                user_id: None,
             };
             let _ = insert_message(&db, msg).await;
         }
@@ -247,6 +277,8 @@ mod tests {
                 user_name: format!("user{}", i),
                 content: format!("msg{}", i),
                 timestamp: Utc::now(),
+                room_id: None,
+                user_id: None,
             };
             let _ = insert_message(&db, msg).await;
         }
@@ -271,6 +303,8 @@ mod tests {
                 user_name: format!("user{}", i),
                 content: format!("msg{}", i),
                 timestamp: Utc::now(),
+                room_id: None,
+                user_id: None,
             };
             let _ = insert_message(&db, msg).await;
         }
@@ -290,6 +324,8 @@ mod tests {
                 user_name: format!("user{}", i),
                 content: format!("msg{}", i),
                 timestamp: Utc::now(),
+                room_id: None,
+                user_id: None,
             };
             let _ = insert_message(&db, msg).await;
         }
@@ -314,6 +350,8 @@ mod tests {
                 user_name: format!("user{}", i),
                 content: format!("msg{}", i),
                 timestamp: Utc::now(),
+                room_id: None,
+                user_id: None,
             };
             let _ = insert_message(&db, msg).await;
         }
@@ -335,6 +373,8 @@ mod tests {
                 user_name: format!("user{}", i),
                 content: format!("msg{}", i),
                 timestamp: Utc::now(),
+                room_id: None,
+                user_id: None,
             };
             let _ = insert_message(&db, msg).await;
         }
@@ -359,6 +399,8 @@ mod tests {
             user_name: "tester".to_string(),
             content: original_content.to_string(),
             timestamp: Utc::now(),
+            room_id: None,
+            user_id: None,
         };
 
         let inserted = insert_message(&db, msg).await.unwrap();
@@ -389,6 +431,8 @@ mod tests {
                 user_name: format!("user{}", i),
                 content: format!("msg{}", i),
                 timestamp: Utc::now(),
+                room_id: None,
+                user_id: None,
             };
             let _ = insert_message(&db, msg).await;
         }
@@ -418,6 +462,8 @@ mod tests {
                 user_name: format!("user{}", i),
                 content: format!("msg{}", i),
                 timestamp: Utc::now(),
+                room_id: None,
+                user_id: None,
             };
             let _ = insert_message(&db, msg).await;
         }
@@ -445,6 +491,8 @@ mod tests {
                 user_name: format!("user{}", i),
                 content: format!("msg{}", i),
                 timestamp: Utc::now(),
+                room_id: None,
+                user_id: None,
             };
             let _ = insert_message(&db, msg).await;
         }
@@ -471,6 +519,8 @@ mod tests {
                 user_name: format!("user{}", i),
                 content: format!("msg{}", i),
                 timestamp: Utc::now(),
+                room_id: None,
+                user_id: None,
             };
             let _ = insert_message(&db, msg).await;
         }
@@ -495,6 +545,8 @@ mod tests {
                 user_name: format!("user{}", i),
                 content: format!("msg{}", i),
                 timestamp: Utc::now(),
+                room_id: None,
+                user_id: None,
             };
             let _ = insert_message(&db, msg).await;
         }
@@ -519,6 +571,8 @@ mod tests {
                 user_name: format!("user{}", i),
                 content: format!("msg{}", i),
                 timestamp: Utc::now(),
+                room_id: None,
+                user_id: None,
             };
             let _ = insert_message(&db, msg).await;
         }
@@ -541,6 +595,8 @@ mod tests {
                 user_name: format!("user{}", i),
                 content: format!("msg{}", i),
                 timestamp: Utc::now(),
+                room_id: None,
+                user_id: None,
             };
             let _ = insert_message(&db, msg).await;
         }
@@ -570,6 +626,8 @@ mod tests {
                 user_name: format!("user{}", i),
                 content: format!("msg{}", i),
                 timestamp: now,
+                room_id: None,
+                user_id: None,
             };
             let _ = insert_message(&db, msg).await;
         }
@@ -593,6 +651,8 @@ mod tests {
             user_name: "alice".to_string(),
             content: "Test message with特殊字符 and emoji 😊".to_string(),
             timestamp: Utc::now(),
+            room_id: None,
+            user_id: None,
         };
         let _ = insert_message(&db, msg).await;
 

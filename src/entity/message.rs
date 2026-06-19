@@ -7,6 +7,9 @@ use sea_orm::entity::prelude::*;
 
 use chrono::DateTime;
 
+use crate::entity::room;
+use crate::entity::user;
+
 #[sea_orm::model]
 #[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel)]
 #[sea_orm(table_name = "messages")]
@@ -19,6 +22,16 @@ pub struct Model {
 
     #[serde(with = "chrono::serde::ts_milliseconds")]
     pub timestamp: DateTime<Utc>,
+
+    pub room_id: Option<u32>,
+    #[sea_orm(belongs_to, from = "room_id", to = "id")]
+    #[serde(skip)]
+    pub room: HasOne<room::Entity>,
+
+    pub user_id: Option<u32>,
+    #[sea_orm(belongs_to, from = "user_id", to = "id")]
+    #[serde(skip)]
+    pub user: HasOne<user::Entity>,
 }
 
 impl ActiveModelBehavior for ActiveModel {}
@@ -36,6 +49,8 @@ mod tests {
             user_name: "alice".to_string(),
             content: "Hello, World!".to_string(),
             timestamp: now,
+            room_id: None,
+            user_id: None,
         };
 
         assert_eq!(msg.id, 1);
@@ -52,6 +67,8 @@ mod tests {
             user_name: "bob".to_string(),
             content: "Test message".to_string(),
             timestamp: now,
+            room_id: None,
+            user_id: None,
         };
 
         let msg2 = msg1.clone();
@@ -68,6 +85,8 @@ mod tests {
             user_name: "charlie".to_string(),
             content: "Same content".to_string(),
             timestamp: now,
+            room_id: None,
+            user_id: None,
         };
 
         let msg2 = Model {
@@ -75,6 +94,8 @@ mod tests {
             user_name: "charlie".to_string(),
             content: "Same content".to_string(),
             timestamp: now,
+            room_id: None,
+            user_id: None,
         };
 
         let msg3 = Model {
@@ -82,6 +103,8 @@ mod tests {
             user_name: "dave".to_string(),
             content: "Different content".to_string(),
             timestamp: now,
+            room_id: None,
+            user_id: None,
         };
 
         assert_eq!(msg1, msg2);
@@ -96,6 +119,8 @@ mod tests {
             user_name: "user5".to_string(),
             content: "Serializable message".to_string(),
             timestamp: now,
+            room_id: None,
+            user_id: None,
         };
 
         let json = serde_json::to_string(&msg);
@@ -132,6 +157,8 @@ mod tests {
             user_name: "user@123".to_string(),
             content: "Content with 中文, emoji 😊, and !@#$%^&*()".to_string(),
             timestamp: now,
+            room_id: None,
+            user_id: None,
         };
 
         assert_eq!(msg.user_name, "user@123");
@@ -149,6 +176,8 @@ mod tests {
             user_name: "user8".to_string(),
             content: content.to_string(),
             timestamp: now,
+            room_id: None,
+            user_id: None,
         };
 
         assert_eq!(msg.content, content);
@@ -164,6 +193,8 @@ mod tests {
             user_name: "user9".to_string(),
             content: String::new(),
             timestamp: now,
+            room_id: None,
+            user_id: None,
         };
 
         assert!(msg.content.is_empty());
@@ -178,6 +209,8 @@ mod tests {
             user_name: "user10".to_string(),
             content: long_content.clone(),
             timestamp: now,
+            room_id: None,
+            user_id: None,
         };
 
         assert_eq!(msg.content, long_content);
@@ -192,6 +225,8 @@ mod tests {
             user_name: "user11".to_string(),
             content: "Round trip test".to_string(),
             timestamp: now,
+            room_id: None,
+            user_id: None,
         };
 
         let json = serde_json::to_string(&original).unwrap();

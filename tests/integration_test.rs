@@ -408,6 +408,9 @@ async fn create_message_db() -> MessageDb {
         .await
         .expect("Failed to connect to in-memory SQLite");
     let message_db = MessageDb(db);
+    // 需要先创建 users/rooms 表以满足 FK 约束
+    let user_db = UserDb(message_db.0.clone());
+    db::init_user_table(&user_db).await;
     db::init_message_table(&message_db).await;
     message_db
 }
@@ -420,6 +423,8 @@ async fn test_insert_message() {
         user_name: "alice".to_string(),
         content: "Hello, World!".to_string(),
         timestamp: Utc::now(),
+        room_id: None,
+        user_id: None,
     };
 
     let result = db::messages::insert_message(&db, msg.clone()).await;
@@ -441,6 +446,8 @@ async fn test_insert_multiple_messages() {
             user_name: format!("user{}", i),
             content: format!("Message {}", i),
             timestamp: Utc::now(),
+            room_id: None,
+            user_id: None,
         };
         let result = db::messages::insert_message(&db, msg).await;
         assert!(result.is_ok());
@@ -473,6 +480,8 @@ async fn test_latest_message_id_with_messages() {
             user_name: format!("user{}", i),
             content: format!("Message {}", i),
             timestamp: Utc::now(),
+            room_id: None,
+            user_id: None,
         };
         let _ = db::messages::insert_message(&db, msg).await;
     }
@@ -494,6 +503,8 @@ async fn test_list_message_before_basic() {
             user_name: format!("user{}", i),
             content: format!("Message {}", i),
             timestamp: Utc::now(),
+            room_id: None,
+            user_id: None,
         };
         let _ = db::messages::insert_message(&db, msg).await;
     }
@@ -522,6 +533,8 @@ async fn test_list_message_before_with_limit() {
             user_name: format!("user{}", i),
             content: format!("Message {}", i),
             timestamp: Utc::now(),
+            room_id: None,
+            user_id: None,
         };
         let _ = db::messages::insert_message(&db, msg).await;
     }
@@ -550,6 +563,8 @@ async fn test_list_message_before_id_at_boundary() {
             user_name: format!("user{}", i),
             content: format!("Message {}", i),
             timestamp: Utc::now(),
+            room_id: None,
+            user_id: None,
         };
         let _ = db::messages::insert_message(&db, msg).await;
     }
@@ -574,6 +589,8 @@ async fn test_list_message_before_no_results() {
             user_name: format!("user{}", i),
             content: format!("Message {}", i),
             timestamp: Utc::now(),
+            room_id: None,
+            user_id: None,
         };
         let _ = db::messages::insert_message(&db, msg).await;
     }
@@ -597,6 +614,8 @@ async fn test_list_message_after_basic() {
             user_name: format!("user{}", i),
             content: format!("Message {}", i),
             timestamp: Utc::now(),
+            room_id: None,
+            user_id: None,
         };
         let _ = db::messages::insert_message(&db, msg).await;
     }
@@ -626,6 +645,8 @@ async fn test_list_message_after_with_limit() {
             user_name: format!("user{}", i),
             content: format!("Message {}", i),
             timestamp: Utc::now(),
+            room_id: None,
+            user_id: None,
         };
         let _ = db::messages::insert_message(&db, msg).await;
     }
@@ -655,6 +676,8 @@ async fn test_list_message_after_id_at_boundary() {
             user_name: format!("user{}", i),
             content: format!("Message {}", i),
             timestamp: Utc::now(),
+            room_id: None,
+            user_id: None,
         };
         let _ = db::messages::insert_message(&db, msg).await;
     }
@@ -679,6 +702,8 @@ async fn test_list_message_after_no_results() {
             user_name: format!("user{}", i),
             content: format!("Message {}", i),
             timestamp: Utc::now(),
+            room_id: None,
+            user_id: None,
         };
         let _ = db::messages::insert_message(&db, msg).await;
     }
@@ -702,6 +727,8 @@ async fn test_list_message_before_and_after_consistency() {
             user_name: format!("user{}", i),
             content: format!("Message {}", i),
             timestamp: Utc::now(),
+            room_id: None,
+            user_id: None,
         };
         let _ = db::messages::insert_message(&db, msg).await;
     }

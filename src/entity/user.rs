@@ -2,6 +2,8 @@
 
 use sea_orm::entity::prelude::*;
 
+use crate::entity::{message, room};
+
 #[sea_orm::model]
 #[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel)]
 #[sea_orm(table_name = "users")]
@@ -13,8 +15,12 @@ pub struct Model {
     pub password: String,
     #[sea_orm(unique)]
     pub token: String,
-}
 
+    #[sea_orm(has_many, via = "room_user")]
+    pub rooms: HasMany<room::Entity>,
+    #[sea_orm(has_many)]
+    pub messages: HasMany<message::Entity>,
+}
 
 impl ActiveModelBehavior for ActiveModel {}
 
