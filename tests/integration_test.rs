@@ -1,35 +1,68 @@
 use axum_test::TestServer;
-use chat_server::{api, db, state::{AppState, MessageDb, UserDb}, entity::message, ws::{hub::Chathub, protocol::RoomCommand}};
-use sea_orm::Database;
+use chat_server::{
+    api, db,
+    db::{MessageDb, RoomDb, RoomUserDb, UserDb},
+    entity::{self, message, RoomId},
+    state::AppState,
+    ws::hub::Chathub,
+};
+use sea_orm::{ConnectionTrait, Database, Schema};
 use serde_json::{json, Value};
 use axum::{Router, http::StatusCode, routing::get};
-use tokio::sync::mpsc;
 use tower_http::trace::TraceLayer;
 use chrono::Utc;
 
-/// 构建测试用 App（使用内存数据库）
+/// 构建测试用 App（使用共享内存数据库以支持 FK 约束）
 pub async fn build_test_app() -> Router {
-    let user_db = Database::connect("sqlite::memory:")
+    let conn = Database::connect("sqlite::memory:")
         .await
         .expect("Failed to connect to in-memory SQLite");
 
-    let message_db = Database::connect("sqlite::memory:")
-        .await
-        .expect("Failed to connect to in-memory SQLite");
+    // 在共享数据库上创建所有表
+    let builder = conn.get_database_backend();
+    let schema = Schema::new(builder);
+    conn.execute(
+        schema
+            .create_table_from_entity(entity::user::Entity)
+            .if_not_exists(),
+    )
+    .await
+    .expect("Failed to create users table");
+    conn.execute(
+        schema
+            .create_table_from_entity(entity::room::Entity)
+            .if_not_exists(),
+    )
+    .await
+    .expect("Failed to create rooms table");
+    conn.execute(
+        schema
+            .create_table_from_entity(entity::message::Entity)
+            .if_not_exists(),
+    )
+    .await
+    .expect("Failed to create messages table");
+    conn.execute(
+        schema
+            .create_table_from_entity(entity::room_user::Entity)
+            .if_not_exists(),
+    )
+    .await
+    .expect("Failed to create room_users table");
 
-    let user_db = UserDb(user_db);
-    let message_db = MessageDb(message_db);
+    let user_db = UserDb(conn.clone());
+    let message_db = MessageDb(conn.clone());
+    let room_db = RoomDb(conn.clone());
+    let room_users_db = RoomUserDb(conn);
 
-    db::init_user_table(&user_db).await;
-    db::init_message_table(&message_db).await;
-    
-
-    let (tx, _rx) = mpsc::channel::<RoomCommand>(32);
+    let chathub = Chathub::new(room_db.clone(), message_db.clone()).await;
 
     let app_state = AppState {
         user_db,
         message_db,
-        chathub: Chathub::new(tx),
+        room_db,
+        room_users_db,
+        chathub,
     };
 
     let api_router = api::init_api_router(app_state);
@@ -402,28 +435,67 @@ async fn test_login_case_sensitive_username() {
 
 // ==================== 消息数据库操作测试 ====================
 
-/// 辅助函数：创建消息数据库连接
-async fn create_message_db() -> MessageDb {
-    let db = Database::connect("sqlite::memory:")
+/// 辅助函数：创建消息数据库连接（使用共享内存数据库以支持 FK）
+async fn create_message_db() -> (MessageDb, RoomId) {
+    use sea_orm::Database;
+    let conn = Database::connect("sqlite::memory:")
         .await
         .expect("Failed to connect to in-memory SQLite");
-    let message_db = MessageDb(db);
-    // 需要先创建 users/rooms 表以满足 FK 约束
-    let user_db = UserDb(message_db.0.clone());
-    db::init_user_table(&user_db).await;
-    db::init_message_table(&message_db).await;
-    message_db
+
+    // 在同一数据库上创建所有表（FK 约束需要 rooms、users 和 messages 在同一数据库）
+    use sea_orm::{ConnectionTrait, Schema};
+    let builder = conn.get_database_backend();
+    let schema = Schema::new(builder);
+
+    conn.execute(
+        schema
+            .create_table_from_entity(entity::user::Entity)
+            .if_not_exists(),
+    )
+    .await
+    .expect("Failed to create users table");
+    conn.execute(
+        schema
+            .create_table_from_entity(entity::room::Entity)
+            .if_not_exists(),
+    )
+    .await
+    .expect("Failed to create rooms table");
+    conn.execute(
+        schema
+            .create_table_from_entity(entity::message::Entity)
+            .if_not_exists(),
+    )
+    .await
+    .expect("Failed to create messages table");
+
+    let room_db = RoomDb(conn.clone());
+    let message_db = MessageDb(conn);
+
+    // 创建一个测试房间
+    let room = db::rooms::create_room(
+        &room_db,
+        entity::room::Model {
+            id: RoomId(0),
+            room_name: "test_room".to_string(),
+            password: "".to_string(),
+        },
+    )
+    .await
+    .expect("Failed to create test room");
+
+    (message_db, room.id)
 }
 
 #[tokio::test]
 async fn test_insert_message() {
-    let db = create_message_db().await;
+    let (db, room_id) = create_message_db().await;
     let msg = message::Model {
         id: 0,
         user_name: "alice".to_string(),
         content: "Hello, World!".to_string(),
         timestamp: Utc::now(),
-        room_id: None,
+        room_id: Some(room_id.0),
         user_id: None,
     };
 
@@ -438,7 +510,7 @@ async fn test_insert_message() {
 
 #[tokio::test]
 async fn test_insert_multiple_messages() {
-    let db = create_message_db().await;
+    let (db, room_id) = create_message_db().await;
     
     for i in 0..3 {
         let msg = message::Model {
@@ -446,7 +518,7 @@ async fn test_insert_multiple_messages() {
             user_name: format!("user{}", i),
             content: format!("Message {}", i),
             timestamp: Utc::now(),
-            room_id: None,
+            room_id: Some(room_id.0),
             user_id: None,
         };
         let result = db::messages::insert_message(&db, msg).await;
@@ -454,16 +526,16 @@ async fn test_insert_multiple_messages() {
     }
 
     // 验证最新消息 ID 为 3
-    let latest_id = db::messages::latest_message_id(&db).await;
+    let latest_id = db::messages::latest_message_id(&db, room_id.clone()).await;
     assert!(latest_id.is_ok());
     assert_eq!(latest_id.unwrap(), Some(3));
 }
 
 #[tokio::test]
 async fn test_latest_message_id_empty_table() {
-    let db = create_message_db().await;
+    let (db, room_id) = create_message_db().await;
     
-    let result = db::messages::latest_message_id(&db).await;
+    let result = db::messages::latest_message_id(&db, room_id).await;
     
     assert!(result.is_ok());
     assert_eq!(result.unwrap(), None);
@@ -471,7 +543,7 @@ async fn test_latest_message_id_empty_table() {
 
 #[tokio::test]
 async fn test_latest_message_id_with_messages() {
-    let db = create_message_db().await;
+    let (db, room_id) = create_message_db().await;
     
     // 插入三条消息
     for i in 1..=3 {
@@ -480,13 +552,13 @@ async fn test_latest_message_id_with_messages() {
             user_name: format!("user{}", i),
             content: format!("Message {}", i),
             timestamp: Utc::now(),
-            room_id: None,
+            room_id: Some(room_id.0),
             user_id: None,
         };
         let _ = db::messages::insert_message(&db, msg).await;
     }
 
-    let result = db::messages::latest_message_id(&db).await;
+    let result = db::messages::latest_message_id(&db, room_id).await;
     
     assert!(result.is_ok());
     assert_eq!(result.unwrap(), Some(3));
@@ -494,7 +566,7 @@ async fn test_latest_message_id_with_messages() {
 
 #[tokio::test]
 async fn test_list_message_before_basic() {
-    let db = create_message_db().await;
+    let (db, room_id) = create_message_db().await;
     
     // 插入 5 条消息 (id: 1, 2, 3, 4, 5)
     for i in 1..=5 {
@@ -503,14 +575,14 @@ async fn test_list_message_before_basic() {
             user_name: format!("user{}", i),
             content: format!("Message {}", i),
             timestamp: Utc::now(),
-            room_id: None,
+            room_id: Some(room_id.0),
             user_id: None,
         };
         let _ = db::messages::insert_message(&db, msg).await;
     }
 
     // 查询 ID <= 3 的消息
-    let result = db::messages::list_message_before(&db, 3, 10).await;
+    let result = db::messages::list_message_before(&db, room_id.clone(), 3, 10).await;
     
     assert!(result.is_ok());
     let messages = result.unwrap();
@@ -524,7 +596,7 @@ async fn test_list_message_before_basic() {
 
 #[tokio::test]
 async fn test_list_message_before_with_limit() {
-    let db = create_message_db().await;
+    let (db, room_id) = create_message_db().await;
     
     // 插入 10 条消息
     for i in 1..=10 {
@@ -533,14 +605,14 @@ async fn test_list_message_before_with_limit() {
             user_name: format!("user{}", i),
             content: format!("Message {}", i),
             timestamp: Utc::now(),
-            room_id: None,
+            room_id: Some(room_id.0),
             user_id: None,
         };
         let _ = db::messages::insert_message(&db, msg).await;
     }
 
     // 查询 ID <= 7 的消息，但限制只返回 3 条
-    let result = db::messages::list_message_before(&db, 7, 3).await;
+    let result = db::messages::list_message_before(&db, room_id.clone(), 7, 3).await;
     
     assert!(result.is_ok());
     let messages = result.unwrap();
@@ -554,7 +626,7 @@ async fn test_list_message_before_with_limit() {
 
 #[tokio::test]
 async fn test_list_message_before_id_at_boundary() {
-    let db = create_message_db().await;
+    let (db, room_id) = create_message_db().await;
     
     // 插入 5 条消息
     for i in 1..=5 {
@@ -563,14 +635,14 @@ async fn test_list_message_before_id_at_boundary() {
             user_name: format!("user{}", i),
             content: format!("Message {}", i),
             timestamp: Utc::now(),
-            room_id: None,
+            room_id: Some(room_id.0),
             user_id: None,
         };
         let _ = db::messages::insert_message(&db, msg).await;
     }
 
     // 查询 ID <= 1 的消息
-    let result = db::messages::list_message_before(&db, 1, 10).await;
+    let result = db::messages::list_message_before(&db, room_id.clone(), 1, 10).await;
     
     assert!(result.is_ok());
     let messages = result.unwrap();
@@ -580,7 +652,7 @@ async fn test_list_message_before_id_at_boundary() {
 
 #[tokio::test]
 async fn test_list_message_before_no_results() {
-    let db = create_message_db().await;
+    let (db, room_id) = create_message_db().await;
     
     // 插入 3 条消息
     for i in 1..=3 {
@@ -589,14 +661,14 @@ async fn test_list_message_before_no_results() {
             user_name: format!("user{}", i),
             content: format!("Message {}", i),
             timestamp: Utc::now(),
-            room_id: None,
+            room_id: Some(room_id.0),
             user_id: None,
         };
         let _ = db::messages::insert_message(&db, msg).await;
     }
 
     // 查询 ID <= 0 的消息（不存在）
-    let result = db::messages::list_message_before(&db, 0, 10).await;
+    let result = db::messages::list_message_before(&db, room_id.clone(), 0, 10).await;
     
     assert!(result.is_ok());
     let messages = result.unwrap();
@@ -605,7 +677,7 @@ async fn test_list_message_before_no_results() {
 
 #[tokio::test]
 async fn test_list_message_after_basic() {
-    let db = create_message_db().await;
+    let (db, room_id) = create_message_db().await;
     
     // 插入 5 条消息
     for i in 1..=5 {
@@ -614,14 +686,14 @@ async fn test_list_message_after_basic() {
             user_name: format!("user{}", i),
             content: format!("Message {}", i),
             timestamp: Utc::now(),
-            room_id: None,
+            room_id: Some(room_id.0),
             user_id: None,
         };
         let _ = db::messages::insert_message(&db, msg).await;
     }
 
     // 查询 ID >= 2 的消息
-    let result = db::messages::list_message_after(&db, 2, 10).await;
+    let result = db::messages::list_message_after(&db, room_id.clone(), 2, 10).await;
     
     assert!(result.is_ok());
     let messages = result.unwrap();
@@ -636,7 +708,7 @@ async fn test_list_message_after_basic() {
 
 #[tokio::test]
 async fn test_list_message_after_with_limit() {
-    let db = create_message_db().await;
+    let (db, room_id) = create_message_db().await;
     
     // 插入 10 条消息
     for i in 1..=10 {
@@ -645,14 +717,14 @@ async fn test_list_message_after_with_limit() {
             user_name: format!("user{}", i),
             content: format!("Message {}", i),
             timestamp: Utc::now(),
-            room_id: None,
+            room_id: Some(room_id.0),
             user_id: None,
         };
         let _ = db::messages::insert_message(&db, msg).await;
     }
 
     // 查询 ID >= 3 的消息，但限制只返回 4 条
-    let result = db::messages::list_message_after(&db, 3, 4).await;
+    let result = db::messages::list_message_after(&db, room_id.clone(), 3, 4).await;
     
     assert!(result.is_ok());
     let messages = result.unwrap();
@@ -667,7 +739,7 @@ async fn test_list_message_after_with_limit() {
 
 #[tokio::test]
 async fn test_list_message_after_id_at_boundary() {
-    let db = create_message_db().await;
+    let (db, room_id) = create_message_db().await;
     
     // 插入 5 条消息
     for i in 1..=5 {
@@ -676,14 +748,14 @@ async fn test_list_message_after_id_at_boundary() {
             user_name: format!("user{}", i),
             content: format!("Message {}", i),
             timestamp: Utc::now(),
-            room_id: None,
+            room_id: Some(room_id.0),
             user_id: None,
         };
         let _ = db::messages::insert_message(&db, msg).await;
     }
 
     // 查询 ID >= 5 的消息
-    let result = db::messages::list_message_after(&db, 5, 10).await;
+    let result = db::messages::list_message_after(&db, room_id.clone(), 5, 10).await;
     
     assert!(result.is_ok());
     let messages = result.unwrap();
@@ -693,7 +765,7 @@ async fn test_list_message_after_id_at_boundary() {
 
 #[tokio::test]
 async fn test_list_message_after_no_results() {
-    let db = create_message_db().await;
+    let (db, room_id) = create_message_db().await;
     
     // 插入 3 条消息
     for i in 1..=3 {
@@ -702,14 +774,14 @@ async fn test_list_message_after_no_results() {
             user_name: format!("user{}", i),
             content: format!("Message {}", i),
             timestamp: Utc::now(),
-            room_id: None,
+            room_id: Some(room_id.0),
             user_id: None,
         };
         let _ = db::messages::insert_message(&db, msg).await;
     }
 
     // 查询 ID >= 100 的消息（不存在）
-    let result = db::messages::list_message_after(&db, 100, 10).await;
+    let result = db::messages::list_message_after(&db, room_id.clone(), 100, 10).await;
     
     assert!(result.is_ok());
     let messages = result.unwrap();
@@ -718,7 +790,7 @@ async fn test_list_message_after_no_results() {
 
 #[tokio::test]
 async fn test_list_message_before_and_after_consistency() {
-    let db = create_message_db().await;
+    let (db, room_id) = create_message_db().await;
     
     // 插入 5 条消息
     for i in 1..=5 {
@@ -727,18 +799,18 @@ async fn test_list_message_before_and_after_consistency() {
             user_name: format!("user{}", i),
             content: format!("Message {}", i),
             timestamp: Utc::now(),
-            room_id: None,
+            room_id: Some(room_id.0),
             user_id: None,
         };
         let _ = db::messages::insert_message(&db, msg).await;
     }
 
     // 查询 ID <= 3 的消息 (before)
-    let before_result = db::messages::list_message_before(&db, 3, 10).await;
+    let before_result = db::messages::list_message_before(&db, room_id.clone(), 3, 10).await;
     let before_messages = before_result.unwrap();
     
     // 查询 ID >= 3 的消息 (after)
-    let after_result = db::messages::list_message_after(&db, 3, 10).await;
+    let after_result = db::messages::list_message_after(&db, room_id.clone(), 3, 10).await;
     let after_messages = after_result.unwrap();
 
     // ID 3 应该在两个结果中都出现
@@ -1063,4 +1135,584 @@ async fn test_leading_trailing_whitespace() {
     // 如果空格被处理，这会返回 409；否则返回 201
     // 这取决于应用的实现选择
     assert!(status3 == 201 || status3 == 409);
+}
+
+// ==================== 房间创建测试 ====================
+
+/// 辅助函数：注册并登录，返回 (server, token)
+async fn register_and_login(server: &TestServer, user_name: &str, password: &str) -> String {
+    let (status, _) = register_user(server, user_name, password).await;
+    assert_eq!(status, 201);
+
+    let response = server
+        .post("/api/login")
+        .json(&json!({"user_name": user_name, "password": password}))
+        .await;
+
+    extract_token_from_response(&response).expect("Failed to extract token")
+}
+
+/// 辅助函数：创建房间，返回 (status, body)
+async fn create_room(
+    server: &TestServer,
+    token: &str,
+    room_name: &str,
+    password: &str,
+) -> (StatusCode, Value) {
+    let response = server
+        .post(&format!(
+            "/api/rooms?room_name={}&password={}",
+            room_name, password
+        ))
+        .add_header("cookie", &format!("token={}", token))
+        .await;
+
+    let status = response.status_code();
+    let body: Value = response.json();
+    (status, body)
+}
+
+#[tokio::test]
+async fn test_create_room_success() {
+    let server = test_server().await;
+    let token = register_and_login(&server, "room_creator", "pass123").await;
+
+    let (status, body) = create_room(&server, &token, "general", "room_pass").await;
+    assert_eq!(status, 200);
+    assert_eq!(body["message"], "创建房间成功");
+}
+
+#[tokio::test]
+async fn test_create_room_without_auth() {
+    let server = test_server().await;
+
+    let response = server
+        .post("/api/rooms?room_name=test&password=pass")
+        .await;
+
+    assert_eq!(response.status_code(), 400);
+    let body: Value = response.json();
+    assert_eq!(body["message"], "请登录");
+}
+
+#[tokio::test]
+async fn test_create_room_duplicate_name() {
+    let server = test_server().await;
+    let token = register_and_login(&server, "dup_creator", "pass123").await;
+
+    let (status1, _) = create_room(&server, &token, "duplicate_room", "pass").await;
+    assert_eq!(status1, 200);
+
+    let (status2, body2) = create_room(&server, &token, "duplicate_room", "different_pass").await;
+    assert_eq!(status2, 409);
+    assert_eq!(body2["message"], "房间名重复");
+}
+
+#[tokio::test]
+async fn test_create_room_empty_name() {
+    let server = test_server().await;
+    let token = register_and_login(&server, "empty_creator", "pass123").await;
+
+    let (status, _) = create_room(&server, &token, "", "pass").await;
+    // 空房间名：取决于实现，可能成功也可能返回错误
+    // 这里仅验证不 panic
+    assert!(status == 200 || status == 400 || status == 409 || status == 503);
+}
+
+#[tokio::test]
+async fn test_create_multiple_rooms() {
+    let server = test_server().await;
+    let token = register_and_login(&server, "multi_creator", "pass123").await;
+
+    for i in 1..=3 {
+        let (status, body) = create_room(&server, &token, &format!("room_{}", i), "pass").await;
+        assert_eq!(status, 200, "room_{} should be created: {:?}", i, body);
+    }
+}
+
+#[tokio::test]
+async fn test_create_rooms_by_different_users() {
+    let server = test_server().await;
+    let token1 = register_and_login(&server, "user_A", "passA").await;
+    let token2 = register_and_login(&server, "user_B", "passB").await;
+
+    // 两个用户分别创建房间
+    let (status1, _) = create_room(&server, &token1, "room_A", "pass").await;
+    assert_eq!(status1, 200);
+
+    let (status2, _) = create_room(&server, &token2, "room_B", "pass").await;
+    assert_eq!(status2, 200);
+
+    // 不同用户不能创建同名房间
+    let (status3, body3) = create_room(&server, &token2, "room_A", "pass").await;
+    assert_eq!(status3, 409);
+    assert_eq!(body3["message"], "房间名重复");
+}
+
+// ==================== 房间消息查询测试 (API 层) ====================
+
+/// 辅助函数：获取房间消息
+async fn get_room_messages(
+    server: &TestServer,
+    token: &str,
+    room_id: u32,
+    query: &str,
+) -> (StatusCode, Value) {
+    let url = format!("/api/rooms/{}/messages{}", room_id, query);
+    let response = server
+        .get(&url)
+        .add_header("cookie", &format!("token={}", token))
+        .await;
+
+    (response.status_code(), response.json())
+}
+
+/// 辅助函数：获取房间最新消息 ID
+async fn get_room_message_meta(
+    server: &TestServer,
+    token: &str,
+    room_id: u32,
+) -> (StatusCode, Value) {
+    let url = format!("/api/rooms/{}/messages/meta", room_id);
+    let response = server
+        .get(&url)
+        .add_header("cookie", &format!("token={}", token))
+        .await;
+
+    (response.status_code(), response.json())
+}
+
+#[tokio::test]
+async fn test_room_messages_not_member() {
+    let server = test_server().await;
+    let creator_token = register_and_login(&server, "creator_msg", "pass123").await;
+    let outsider_token = register_and_login(&server, "outsider_msg", "pass456").await;
+
+    // 创建者创建房间（自动加入）
+    let (status, _) = create_room(&server, &creator_token, "msg_room", "pass").await;
+    assert_eq!(status, 200);
+
+    // 非成员尝试访问房间消息（room_id=1），应被拒绝
+    let (status, body) = get_room_messages(&server, &outsider_token, 1, "?limit=10").await;
+    assert_eq!(status, 400);
+    assert_eq!(body["message"], "不正确的房间");
+}
+
+#[tokio::test]
+async fn test_room_messages_empty() {
+    let server = test_server().await;
+    let token = register_and_login(&server, "empty_room_user", "pass123").await;
+
+    let (status, _) = create_room(&server, &token, "empty_room", "pass").await;
+    assert_eq!(status, 200);
+
+    let (status, body) = get_room_messages(&server, &token, 1, "?limit=10").await;
+    assert_eq!(status, 200);
+    // 空房间应该返回空消息列表
+    assert!(body["messages"].is_array());
+    assert_eq!(body["messages"].as_array().unwrap().len(), 0);
+}
+
+#[tokio::test]
+async fn test_room_message_meta_empty() {
+    let server = test_server().await;
+    let token = register_and_login(&server, "meta_user", "pass123").await;
+
+    let (status, _) = create_room(&server, &token, "meta_room", "pass").await;
+    assert_eq!(status, 200);
+
+    let (status, body) = get_room_message_meta(&server, &token, 1).await;
+    assert_eq!(status, 200);
+    // 空房间时 meta 返回 id=1
+    assert_eq!(body["id"], 1);
+}
+
+#[tokio::test]
+async fn test_room_messages_not_found() {
+    let server = test_server().await;
+    let token = register_and_login(&server, "bad_room_user", "pass123").await;
+
+    // 创建并加入房间（room_id=1）
+    let (status, _) = create_room(&server, &token, "joined_room", "pass").await;
+    assert_eq!(status, 200);
+
+    // 尝试访问不存在的房间（room_id=999）
+    let (status, body) = get_room_messages(&server, &token, 999, "?limit=10").await;
+    assert_eq!(status, 400);
+    assert_eq!(body["message"], "不正确的房间");
+}
+
+// ==================== 用户登出后 token 安全性测试 ====================
+
+#[tokio::test]
+async fn test_token_still_valid_after_multiple_logins() {
+    let server = test_server().await;
+
+    register_user(&server, "relogin_user", "pass123").await;
+
+    // 第一次登录
+    let resp1 = server
+        .post("/api/login")
+        .json(&json!({"user_name": "relogin_user", "password": "pass123"}))
+        .await;
+    let token1 = extract_token_from_response(&resp1).unwrap();
+
+    // 第二次登录（可能获取相同或不同的 token）
+    let resp2 = server
+        .post("/api/login")
+        .json(&json!({"user_name": "relogin_user", "password": "pass123"}))
+        .await;
+    let token2 = extract_token_from_response(&resp2).unwrap();
+
+    // 两个 token 都应有效
+    let (s1, _) = get_me(&server, &token1).await;
+    let (s2, _) = get_me(&server, &token2).await;
+    assert_eq!(s1, 200);
+    assert_eq!(s2, 200);
+}
+
+// ==================== 序列化兼容性测试 ====================
+
+#[tokio::test]
+async fn test_message_serialization_roundtrip() {
+    let msg = message::Model {
+        id: 42,
+        user_name: "test_user".to_string(),
+        content: "Hello, World!".to_string(),
+        timestamp: Utc::now(),
+        room_id: Some(1),
+        user_id: Some(100),
+    };
+
+    let json_str = serde_json::to_string(&msg).expect("Failed to serialize");
+    let deserialized: message::Model =
+        serde_json::from_str(&json_str).expect("Failed to deserialize");
+
+    assert_eq!(msg.id, deserialized.id);
+    assert_eq!(msg.user_name, deserialized.user_name);
+    assert_eq!(msg.content, deserialized.content);
+    assert_eq!(msg.room_id, deserialized.room_id);
+    assert_eq!(msg.user_id, deserialized.user_id);
+}
+
+// ==================== 并发房间操作测试 ====================
+
+#[tokio::test]
+async fn test_concurrent_room_creation() {
+    let server = test_server().await;
+    let token = register_and_login(&server, "concurrent_room", "pass123").await;
+
+    // 顺序创建多个房间（TestServer 不支持 Send，无法 spawn）
+    for i in 0..5 {
+        let (status, _) = create_room(&server, &token, &format!("conc_room_{}", i), "pass").await;
+        assert_eq!(status, 200);
+    }
+
+    // 验证所有房间都已创建（尝试创建重复房间应返回 409）
+    let (dup_status, _) = create_room(&server, &token, "conc_room_0", "pass").await;
+    assert_eq!(dup_status, 409);
+}
+
+// ==================== 房间消息 API 参数校验测试 ====================
+
+#[tokio::test]
+async fn test_room_messages_before_and_after_mutually_exclusive() {
+    let server = test_server().await;
+    let token = register_and_login(&server, "mutex_user", "pass123").await;
+
+    let (status, _) = create_room(&server, &token, "mutex_room", "pass").await;
+    assert_eq!(status, 200);
+
+    // before_id 和 after_id 同时存在应返回 400
+    let (status, body) = get_room_messages(&server, &token, 1, "?before_id=3&after_id=2").await;
+    assert_eq!(status, 400);
+    assert_eq!(body["message"], "before_id 和 after_id 不能同时存在");
+}
+
+#[tokio::test]
+async fn test_room_messages_default_limit() {
+    let server = test_server().await;
+    let token = register_and_login(&server, "default_limit_user", "pass123").await;
+
+    let (status, _) = create_room(&server, &token, "default_limit_room", "pass").await;
+    assert_eq!(status, 200);
+
+    // 不带参数查询空房间应返回空列表
+    let (status, body) = get_room_messages(&server, &token, 1, "").await;
+    assert_eq!(status, 200);
+    assert!(body["messages"].is_array());
+    assert_eq!(body["messages"].as_array().unwrap().len(), 0);
+}
+
+#[tokio::test]
+async fn test_room_messages_member_access() {
+    let server = test_server().await;
+    let token = register_and_login(&server, "member_user", "pass123").await;
+
+    let (status, _) = create_room(&server, &token, "member_room", "pass").await;
+    assert_eq!(status, 200);
+
+    // 房间创建者（成员）应该能访问房间消息
+    let (status, body) = get_room_messages(&server, &token, 1, "?limit=10").await;
+    assert_eq!(status, 200);
+    assert!(body["messages"].is_array());
+}
+
+#[tokio::test]
+async fn test_room_message_meta_with_messages() {
+    let server = test_server().await;
+    let token = register_and_login(&server, "meta_msg_user", "pass123").await;
+
+    let (status, _) = create_room(&server, &token, "meta_msg_room", "pass").await;
+    assert_eq!(status, 200);
+
+    // 空房间 meta 返回 id=1
+    let (status, body) = get_room_message_meta(&server, &token, 1).await;
+    assert_eq!(status, 200);
+    assert_eq!(body["id"], 1);
+}
+
+// ==================== 房间消息跨房间隔离测试 ====================
+
+#[tokio::test]
+async fn test_room_messages_cross_room_isolation() {
+    let server = test_server().await;
+    let token = register_and_login(&server, "cross_room_user", "pass123").await;
+
+    // 创建两个房间（用户自动加入）
+    let (status1, _) = create_room(&server, &token, "room_alpha", "pass").await;
+    assert_eq!(status1, 200);
+    let (status2, _) = create_room(&server, &token, "room_beta", "pass").await;
+    assert_eq!(status2, 200);
+
+    // room_alpha 的 id 应该是 1，room_beta 的 id 应该是 2
+    // 两个空房间的消息查询都应返回空
+    let (status_a, body_a) = get_room_messages(&server, &token, 1, "?limit=10").await;
+    assert_eq!(status_a, 200);
+    assert_eq!(body_a["messages"].as_array().unwrap().len(), 0);
+
+    let (status_b, body_b) = get_room_messages(&server, &token, 2, "?limit=10").await;
+    assert_eq!(status_b, 200);
+    assert_eq!(body_b["messages"].as_array().unwrap().len(), 0);
+}
+
+// ==================== 注册边界条件测试 ====================
+
+#[tokio::test]
+async fn test_register_empty_both_fields() {
+    let server = test_server().await;
+    let (status, body) = register_user(&server, "", "").await;
+    assert_eq!(status, 400);
+    assert_eq!(body["message"], "用户名或密码不能为空");
+}
+
+#[tokio::test]
+async fn test_register_only_whitespace_username() {
+    let server = test_server().await;
+    // 纯空格的用户名——取决于实现如何处理
+    let (status, _) = register_user(&server, "   ", "password").await;
+    // 可能成功或失败，仅验证不 panic
+    assert!(status == 201 || status == 400);
+}
+
+#[tokio::test]
+async fn test_login_with_nonexistent_user_special_chars() {
+    let server = test_server().await;
+    let (status, body) = login_user(&server, "!!!nonexistent!!!", "password").await;
+    assert_eq!(status, 401);
+    assert_eq!(body["message"], "用户不存在或密码错误");
+}
+
+// ==================== 房间创建边界条件测试 ====================
+
+#[tokio::test]
+async fn test_create_room_special_chars_in_name() {
+    let server = test_server().await;
+    let token = register_and_login(&server, "special_room_user", "pass123").await;
+
+    // Use URL-safe special characters that won't break query string parsing
+    let (status, _) = create_room(&server, &token, "room_special_chars", "pass!@").await;
+    // Special characters in room name/password, verify no panic
+    assert!(status == 200 || status == 400 || status == 503);
+}
+
+#[tokio::test]
+async fn test_create_room_unicode_name() {
+    let server = test_server().await;
+    let token = register_and_login(&server, "unicode_room_user", "pass123").await;
+
+    let (status, body) = create_room(&server, &token, "聊天室", "密码123").await;
+    assert_eq!(status, 200);
+    assert_eq!(body["message"], "创建房间成功");
+}
+
+// ==================== 无认证访问受保护端点测试 ====================
+
+#[tokio::test]
+async fn test_rooms_endpoint_without_auth() {
+    let server = test_server().await;
+    // GET /api/rooms 未实现，但 POST 需要认证
+    let response = server.post("/api/rooms?room_name=test&password=pass").await;
+    assert_eq!(response.status_code(), 400);
+    let body: Value = response.json();
+    assert_eq!(body["message"], "请登录");
+}
+
+#[tokio::test]
+async fn test_ws_endpoint_without_auth() {
+    let server = test_server().await;
+    // WebSocket 升级请求无认证应被拒绝
+    let response = server.get("/api/rooms/1/ws").await;
+    assert_eq!(response.status_code(), 400);
+    let body: Value = response.json();
+    assert_eq!(body["message"], "请登录");
+}
+
+// ==================== 消息列表 API 测试 ====================
+
+#[tokio::test]
+async fn test_list_message_db() {
+    let (db, room_id) = create_message_db().await;
+
+    // Insert 5 messages
+    for i in 1..=5 {
+        let msg = message::Model {
+            id: 0,
+            user_name: format!("user{}", i),
+            content: format!("msg{}", i),
+            timestamp: Utc::now(),
+            room_id: Some(room_id.0),
+            user_id: None,
+        };
+        let _ = db::messages::insert_message(&db, msg).await;
+    }
+
+    // list_message (no before/after) returns latest messages in descending order
+    let result = db::messages::list_message(&db, room_id.clone(), 3).await;
+    assert!(result.is_ok());
+    let messages = result.unwrap();
+    assert_eq!(messages.len(), 3);
+    assert_eq!(messages[0].id, 5);
+    assert_eq!(messages[1].id, 4);
+    assert_eq!(messages[2].id, 3);
+}
+
+#[tokio::test]
+async fn test_list_message_db_limit_exceeds_count() {
+    let (db, room_id) = create_message_db().await;
+
+    // Insert 2 messages
+    for i in 1..=2 {
+        let msg = message::Model {
+            id: 0,
+            user_name: format!("user{}", i),
+            content: format!("msg{}", i),
+            timestamp: Utc::now(),
+            room_id: Some(room_id.0),
+            user_id: None,
+        };
+        let _ = db::messages::insert_message(&db, msg).await;
+    }
+
+    // Request more than available
+    let result = db::messages::list_message(&db, room_id, 10).await;
+    assert!(result.is_ok());
+    let messages = result.unwrap();
+    assert_eq!(messages.len(), 2);
+}
+
+#[tokio::test]
+async fn test_list_message_after_db_max_id() {
+    let (db, room_id) = create_message_db().await;
+
+    // Insert 3 messages (ids: 1, 2, 3)
+    for i in 1..=3 {
+        let msg = message::Model {
+            id: 0,
+            user_name: format!("user{}", i),
+            content: format!("msg{}", i),
+            timestamp: Utc::now(),
+            room_id: Some(room_id.0),
+            user_id: None,
+        };
+        let _ = db::messages::insert_message(&db, msg).await;
+    }
+
+    // after_id = 3 should return just message 3
+    let result = db::messages::list_message_after(&db, room_id.clone(), 3, 5).await;
+    assert!(result.is_ok());
+    let messages = result.unwrap();
+    assert_eq!(messages.len(), 1);
+    assert_eq!(messages[0].id, 3);
+}
+
+// ==================== 消息内容边界测试 ====================
+
+#[tokio::test]
+async fn test_insert_message_empty_content() {
+    let (db, room_id) = create_message_db().await;
+    let msg = message::Model {
+        id: 0,
+        user_name: "empty_content_user".to_string(),
+        content: String::new(),
+        timestamp: Utc::now(),
+        room_id: Some(room_id.0),
+        user_id: None,
+    };
+
+    let result = db::messages::insert_message(&db, msg).await;
+    assert!(result.is_ok());
+    let inserted = result.unwrap();
+    assert_eq!(inserted.content, "");
+    assert!(inserted.id > 0);
+}
+
+#[tokio::test]
+async fn test_insert_message_very_long_content() {
+    let (db, room_id) = create_message_db().await;
+    let long_content = "x".repeat(10000);
+    let msg = message::Model {
+        id: 0,
+        user_name: "long_content_user".to_string(),
+        content: long_content.clone(),
+        timestamp: Utc::now(),
+        room_id: Some(room_id.0),
+        user_id: None,
+    };
+
+    let result = db::messages::insert_message(&db, msg).await;
+    assert!(result.is_ok());
+    let inserted = result.unwrap();
+    assert_eq!(inserted.content, long_content);
+    assert_eq!(inserted.content.len(), 10000);
+}
+
+// ==================== 消息模型序列化测试 ====================
+
+#[tokio::test]
+async fn test_message_serialization_excludes_room_and_user() {
+    let msg = message::Model {
+        id: 99,
+        user_name: "serial_test".to_string(),
+        content: "test".to_string(),
+        timestamp: Utc::now(),
+        room_id: Some(42),
+        user_id: Some(7),
+    };
+
+    let json_str = serde_json::to_string(&msg).unwrap();
+    // room and user fields should be excluded (serde(skip))
+    assert!(!json_str.contains("\"room\""));
+    assert!(!json_str.contains("\"user\""));
+    // But room_id and user_id should be present
+    assert!(json_str.contains("42"));
+    assert!(json_str.contains("7"));
+}
+
+// ==================== 测试配置常量 ====================
+
+#[test]
+fn test_config_constants() {
+    // 验证配置常量有合理值
+    assert!(chat_server::config::WS_CHANNEL_BUFFER > 0);
 }

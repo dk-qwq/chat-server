@@ -4,7 +4,7 @@ use std::ops::Deref;
 
 use rand::{RngExt, distr::Alphabetic};
 use sea_orm::{ActiveModelTrait, DbErr};
-use crate::{entity::user, state::UserDb};
+use crate::{entity::user, db::UserDb};
 
 use sea_orm::Set;
 

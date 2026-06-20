@@ -7,7 +7,7 @@ use axum::{
 use axum_extra::extract::CookieJar;
 use serde_json::json;
 
-use crate::{state::UserDb, db::users};
+use crate::{db::users, db::UserDb};
 
 pub async fn auth_middleware(
     cookie_jar: CookieJar,

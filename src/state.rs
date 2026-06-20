@@ -1,35 +1,15 @@
-use std::ops::Deref;
-
 use axum::extract::FromRef;
-use sea_orm::DatabaseConnection;
 
-use crate::ws::hub::Chathub;
-
-#[derive(Clone)]
-pub struct UserDb(pub DatabaseConnection);
-
-impl Deref for UserDb {
-    type Target = DatabaseConnection;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-#[derive(Clone)]
-pub struct MessageDb(pub DatabaseConnection);
-
-impl Deref for MessageDb {
-    type Target = DatabaseConnection;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
+use crate::{
+    db::{MessageDb, RoomDb, RoomUserDb, UserDb},
+    ws::hub::Chathub,
+};
 
 #[derive(Clone, FromRef)]
 pub struct AppState {
     pub user_db: UserDb,
+    pub room_db: RoomDb,
     pub message_db: MessageDb,
+    pub room_users_db: RoomUserDb,
     pub chathub: Chathub,
 }

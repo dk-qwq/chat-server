@@ -6,8 +6,8 @@ use tracing::error;
 
 use crate::{
     db::messages,
-    entity::message,
-    state::MessageDb,
+    entity::{RoomId, message},
+    db::MessageDb,
     ws::{
         protocol::RoomCommand,
         session::{SessionHandle, SessionId},
@@ -15,6 +15,7 @@ use crate::{
 };
 
 pub struct RoomActor {
+    id: RoomId,
     tx: mpsc::Sender<RoomCommand>,
     rx: mpsc::Receiver<RoomCommand>,
     members: HashMap<SessionId, SessionHandle>,
@@ -22,9 +23,10 @@ pub struct RoomActor {
 }
 
 impl RoomActor {
-    pub fn new(buffer: usize, db: MessageDb) -> Self {
+    pub fn new(id: RoomId, buffer: usize, db: MessageDb) -> Self {
         let (tx, rx) = mpsc::channel::<RoomCommand>(buffer);
         Self {
+            id,
             tx,
             rx,
             members: HashMap::default(),

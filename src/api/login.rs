@@ -4,7 +4,7 @@ use axum::{
     response::IntoResponse,
 };
 use axum_extra::extract::{CookieJar, cookie::Cookie};
-use crate::{db::users, state::UserDb};
+use crate::{db::users, db::UserDb};
 use sea_orm::sea_query::value::prelude::serde_json::json;
 use serde::{Deserialize, Serialize};
 

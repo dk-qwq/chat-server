@@ -1,7 +1,8 @@
 use axum::{
     Extension,
     extract::{State, WebSocketUpgrade, ws::WebSocket},
-    response::Response,
+    http::StatusCode,
+    response::{IntoResponse, Response},
 };
 
 use futures::{SinkExt, StreamExt};
@@ -11,7 +12,7 @@ use axum::extract::ws::Message as WsMessage;
 use tracing::{error, info, warn};
 
 use crate::{
-    entity::{message, user},
+    entity::{RoomId, message, user},
     ws::{hub::Chathub, protocol::RoomCommand, session::SessionHandle},
 };
 
@@ -19,8 +20,13 @@ pub(super) async fn handler_ws(
     ws: WebSocketUpgrade,
     State(chathub): State<Chathub>,
     Extension(current_user): Extension<user::Model>,
+    Extension(room_id): Extension<RoomId>,
 ) -> Response {
-    ws.on_upgrade(|socket| handler_socket(socket, chathub.global_room_tx, current_user))
+    if let Some(sender) = chathub.get_room_sender(room_id).await {
+        ws.on_upgrade(|socket| handler_socket(socket, sender, current_user))
+    } else {
+        (StatusCode::INTERNAL_SERVER_ERROR).into_response()
+    }
 }
 
 async fn handler_socket(

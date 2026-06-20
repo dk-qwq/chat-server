@@ -3,3 +3,5 @@ project_info.md
 
 users.sqlite
 messages.sqlite
+room_user.sqlite
+rooms.sqlite

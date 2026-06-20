@@ -1,13 +1,13 @@
 use sea_orm::entity::prelude::*;
 
-use crate::entity::{message, user};
+use crate::entity::{RoomId, message, user};
 
 #[sea_orm::model]
 #[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel)]
-#[sea_orm(table_name = "users")]
+#[sea_orm(table_name = "rooms")]
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = true)]
-    pub id: u32,
+    pub id: RoomId,
     #[sea_orm(unique)]
     pub room_name: String,
     pub password: String,
@@ -16,7 +16,6 @@ pub struct Model {
     pub users: HasMany<user::Entity>,
     #[sea_orm(has_many)]
     pub messages: HasMany<message::Entity>,
-    
 }
 
 impl ActiveModelBehavior for ActiveModel {}
@@ -28,12 +27,12 @@ mod tests {
     #[test]
     fn test_room_model_creation() {
         let room = Model {
-            id: 1,
+            id: RoomId(1),
             room_name: "general".to_string(),
             password: "secret123".to_string(),
         };
 
-        assert_eq!(room.id, 1);
+        assert_eq!(room.id, RoomId(1));
         assert_eq!(room.room_name, "general");
         assert_eq!(room.password, "secret123");
     }
@@ -41,7 +40,7 @@ mod tests {
     #[test]
     fn test_room_model_clone() {
         let room1 = Model {
-            id: 2,
+            id: RoomId(2),
             room_name: "lobby".to_string(),
             password: "pass".to_string(),
         };
@@ -56,19 +55,19 @@ mod tests {
     #[test]
     fn test_room_model_equality() {
         let room1 = Model {
-            id: 3,
+            id: RoomId(3),
             room_name: "same".to_string(),
             password: "same_pass".to_string(),
         };
 
         let room2 = Model {
-            id: 3,
+            id: RoomId(3),
             room_name: "same".to_string(),
             password: "same_pass".to_string(),
         };
 
         let room3 = Model {
-            id: 4,
+            id: RoomId(4),
             room_name: "different".to_string(),
             password: "different_pass".to_string(),
         };
@@ -80,7 +79,7 @@ mod tests {
     #[test]
     fn test_room_model_special_characters() {
         let room = Model {
-            id: 5,
+            id: RoomId(5),
             room_name: "中文房间".to_string(),
             password: "!@#$%^&*()".to_string(),
         };
@@ -92,7 +91,7 @@ mod tests {
     #[test]
     fn test_room_model_empty_password() {
         let room = Model {
-            id: 6,
+            id: RoomId(6),
             room_name: "no_password_room".to_string(),
             password: String::new(),
         };
@@ -105,7 +104,7 @@ mod tests {
         let long_name = "r".repeat(255);
         let long_password = "p".repeat(255);
         let room = Model {
-            id: 7,
+            id: RoomId(7),
             room_name: long_name.clone(),
             password: long_password.clone(),
         };

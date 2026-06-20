@@ -1,4 +1,5 @@
 use axum::{
+    Extension,
     extract::{Query, State},
     http::StatusCode,
     response::IntoResponse,
@@ -6,7 +7,7 @@ use axum::{
 use serde::Deserialize;
 use serde_json::json;
 
-use crate::{db::messages, state::MessageDb};
+use crate::{db::messages, entity::RoomId, db::MessageDb};
 
 #[derive(Deserialize)]
 pub(super) struct MessagesQuery {
@@ -18,6 +19,7 @@ pub(super) struct MessagesQuery {
 pub(super) async fn get_message(
     Query(params): Query<MessagesQuery>,
     State(db): State<MessageDb>,
+    Extension(room_id): Extension<RoomId>,
 ) -> impl IntoResponse {
     let db_error = (
         StatusCode::SERVICE_UNAVAILABLE,
@@ -44,25 +46,29 @@ pub(super) async fn get_message(
     }
 
     let res = if let Some(before_id) = params.before_id {
-        messages::list_message_before(&db, before_id, limit as u64).await
+        messages::list_message_before(&db, room_id, before_id, limit as u64).await
     } else if let Some(after_id) = params.after_id {
-        messages::list_message_after(&db, after_id, limit as u64).await
+        messages::list_message_after(&db, room_id, after_id, limit as u64).await
     } else {
-        messages::list_message(&db, limit as u64).await
+        messages::list_message(&db, room_id, limit as u64).await
     };
 
     match res {
         Err(_) => db_error,
         Ok(vec) => (
-            StatusCode::OK, 
+            StatusCode::OK,
             axum::Json(json!({
                 "messages": vec,
             })),
-        ).into_response(),
+        )
+            .into_response(),
     }
 }
 
-pub(super) async fn latest_message_id(State(db): State<MessageDb>) -> impl IntoResponse {
+pub(super) async fn latest_message_id(
+    State(db): State<MessageDb>,
+    Extension(room_id): Extension<RoomId>,
+) -> impl IntoResponse {
     let db_error = (
         StatusCode::SERVICE_UNAVAILABLE,
         axum::Json(json!({
@@ -71,7 +77,7 @@ pub(super) async fn latest_message_id(State(db): State<MessageDb>) -> impl IntoR
     )
         .into_response();
 
-    let id = match messages::latest_message_id(&db).await {
+    let id = match messages::latest_message_id(&db, room_id).await {
         Err(_) => return db_error,
         Ok(Some(id)) => id,
         Ok(None) => 1,

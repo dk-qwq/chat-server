@@ -5,7 +5,7 @@ use axum::{
 use sea_orm::sea_query::value::prelude::serde_json;
 use serde::{Deserialize, Serialize};
 
-use crate::{state::UserDb, db::users, entity::user};
+use crate::{db::users, entity::user, db::UserDb};
 
 #[derive(Serialize, Deserialize)]
 pub(super) struct RegisterRequest {
